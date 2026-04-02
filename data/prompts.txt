@@ -1,0 +1,10 @@
+# Sample prompts for testing
+# Format: audio_file|effect_description
+
+# Example: drum_loop.wav|Add a growing reverb effect that reaches maximum at 8 seconds
+# Example: vocal_sample.wav|Apply a subtle chorus that increases in depth over 10 seconds
+# Example: synth_pad.wav|Create a gradually increasing distortion starting at 2 seconds
+
+# Add your test files and prompts here following the format:
+# path/to/audio.wav|Text description of effects
+
