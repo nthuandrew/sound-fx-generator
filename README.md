@@ -50,6 +50,22 @@ sound-fx-generator/
 └── input.wav                 # Example input audio
 ```
 
+## Examples
+
+**I attached 5 output audio files in the `output/` folder that were generated from `input.wav` using the following prompt.** Listen to them to get a sense of how the system interprets the prompt and applies the effects over time.
+
+Prompt 1: "Apply a mild distortion effect"
+
+Prompt 2: "Add a slowly growing reverb effect"
+
+Prompt 3: "Apply a super strong distortion effect and a high pass filter"
+
+Prompt 4: "Apply a super strong distortion effect and a high pass filter"
+
+Prompt 5: "Apply a super strong distortion effect and a low pass filter, only in the middle part of the audio"
+
+
+
 ## Basic Usage
 
 ### Command Line (Single File)
@@ -78,26 +94,7 @@ output_audio, info = processor.process(
 print(f"Processing info: {info}")
 ```
 
-## Tips for Better Results
-
-### Text Prompts
-
-Good prompts are specific about:
-- **Effects**: reverb, chorus, distortion, low-pass filter
-- **Timing**: "over 10 seconds", "middle part", "gradually", "starting at 2 seconds"
-- **Intensity**: "gentle", "intense", "subtle", "aggressive"
-
-For example: "Add a super strong distortion effect and apply a low pass filter, only in the middle part of the audio"
-
-I attached 5 output audio files in the `output/` folder that were generated from `input.wav` using the following prompt. Listen to them to get a sense of how the system interprets the prompt and applies the effects over time.
-
-Prompt 1: "Apply a mild distortion effect"
-Prompt 2: "Add a slowly growing reverb effect"
-Prompt 3: "Apply a super strong distortion effect and a high pass filter"
-Prompt 4: "Apply a super strong distortion effect and a high pass filter"
-Prompt 5: "Apply a super strong distortion effect and a low pass filter, only in the middle part of the audio"
-
-Sample output logs:
+### Sample output logs:
 
 ```
 
