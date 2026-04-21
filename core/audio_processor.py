@@ -7,7 +7,7 @@ parameter parsing, and effect application.
 
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from core.llm_prompt import generate_effect_parameters
+from core.llm_prompt import generate_effect_parameters, extract_reference_effects
 from core.parameter_parser import ParameterParser, EffectInstance
 from effects import (
     ReverbEffect,
@@ -18,6 +18,7 @@ from effects import (
 from utils.audio_io import load_audio, save_audio, normalize_audio
 from utils.evaluation import compute_spectral_distance
 from utils.reference_audio import analyze_reference_audio
+from utils.spectrogram_renderer import generate_reference_spectrogram_image
 import config
 
 
@@ -62,6 +63,7 @@ class AudioProcessor:
         output_file: Optional[str] = None,
         normalize: bool = True,
         verbose: bool = True,
+        mode: str = "generate",
     ) -> Tuple[np.ndarray, Dict]:
         """
         Complete processing pipeline: load audio, generate parameters, apply effects.
@@ -73,11 +75,16 @@ class AudioProcessor:
             output_file: Optional path to save output audio
             normalize: Whether to normalize output audio
             verbose: Whether to print processing steps
+            mode: Processing mode. "generate" (default) or "extract_and_clone"
             
         Returns:
             Tuple of (output_audio, processing_info_dict)
         """
         processing_info = {}
+        mode = mode.strip().lower().replace("-", "_")
+        if mode not in {"generate", "extract_and_clone"}:
+            raise ValueError(f"Unsupported mode: {mode}")
+        processing_info["mode"] = mode
         
         # Step 1: Load audio
         if verbose:
@@ -90,31 +97,46 @@ class AudioProcessor:
             raise RuntimeError(f"Failed to load audio: {str(e)}")
 
         reference_context = None
-        if reference_audio_file:
-            if verbose:
-                print(f"Analyzing reference audio from {reference_audio_file}...")
-            try:
-                reference_context = analyze_reference_audio(reference_audio_file, sr=self.sample_rate)
-                processing_info["reference_audio_file"] = reference_audio_file
-                processing_info["reference_context"] = reference_context.to_dict()
-            except Exception as e:
-                raise RuntimeError(f"Failed to analyze reference audio: {str(e)}")
-        
-        # Step 2: Generate effect parameters from text prompt
-        if verbose:
-            print(f"Generating effect parameters from prompt...")
-            print(f"  Prompt: \"{text_prompt}\"")
+        if mode == "generate":
             if reference_audio_file:
-                print(f"  Reference audio: {reference_audio_file}")
-        try:
-            llm_output = generate_effect_parameters(
-                text_prompt,
-                audio_duration=len(audio) / sr,
-                reference_context=reference_context.to_dict() if reference_context else None,
-            )
-            processing_info["llm_output"] = llm_output
-        except Exception as e:
-            raise RuntimeError(f"Failed to generate parameters: {str(e)}")
+                if verbose:
+                    print(f"Analyzing reference audio from {reference_audio_file}...")
+                try:
+                    reference_context = analyze_reference_audio(reference_audio_file, sr=self.sample_rate)
+                    processing_info["reference_audio_file"] = reference_audio_file
+                    processing_info["reference_context"] = reference_context.to_dict()
+                except Exception as e:
+                    raise RuntimeError(f"Failed to analyze reference audio: {str(e)}")
+
+            # Step 2 (generate mode): Generate effect parameters from text prompt
+            if verbose:
+                print("Generating effect parameters from prompt...")
+                print(f"  Prompt: \"{text_prompt}\"")
+                if reference_audio_file:
+                    print(f"  Reference audio: {reference_audio_file}")
+            try:
+                llm_output = generate_effect_parameters(
+                    text_prompt,
+                    audio_duration=len(audio) / sr,
+                    reference_context=reference_context.to_dict() if reference_context else None,
+                )
+                processing_info["llm_output"] = llm_output
+            except Exception as e:
+                raise RuntimeError(f"Failed to generate parameters: {str(e)}")
+        else:
+            # Step 2 (extract_and_clone mode): Extract effects from reference spectrogram
+            if not reference_audio_file:
+                raise ValueError("reference_audio_file is required when mode='extract_and_clone'")
+
+            if verbose:
+                print(f"Extracting effects from reference audio: {reference_audio_file}...")
+            try:
+                llm_output = self.extract_reference_effects(reference_audio_file, verbose=verbose)
+                processing_info["reference_audio_file"] = reference_audio_file
+                processing_info["llm_output"] = llm_output
+                processing_info["extracted_effects"] = llm_output.get("effects", [])
+            except Exception as e:
+                raise RuntimeError(f"Failed to extract reference effects: {str(e)}")
         
         # Step 3: Parse parameters
         if verbose:
@@ -131,20 +153,9 @@ class AudioProcessor:
         except Exception as e:
             raise RuntimeError(f"Failed to parse parameters: {str(e)}")
         
-        # Step 4: Create parameter envelopes
-        if verbose:
-            print(f"Creating parameter envelopes...")
-        envelope = self.parser.create_parameter_envelope(
-            effect_instances,
-            len(audio) / sr,
-            sr,
-        )
+        # Step 4 & 5: Create envelopes and apply effects
+        output_audio = self.apply_extracted_effects(audio, sr, effect_instances, verbose=verbose)
         processing_info["envelope_created"] = True
-        
-        # Step 5: Apply effects
-        if verbose:
-            print(f"Applying effects...")
-        output_audio = self._apply_effects_with_envelope(audio, sr, envelope)
         processing_info["effects_applied"] = True
         
         # Step 6: Normalize if requested
@@ -173,6 +184,63 @@ class AudioProcessor:
             print("Processing complete!")
         
         return output_audio, processing_info
+
+    def extract_reference_effects(self, reference_audio_file: str, verbose: bool = True) -> Dict:
+        """
+        Extract time-varying effect parameters from reference audio using VLM.
+
+        Args:
+            reference_audio_file: Path to reference audio
+            verbose: Whether to print progress logs
+
+        Returns:
+            LLM JSON output containing extracted effect segments
+        """
+        # Load reference for duration context
+        ref_audio, ref_sr = load_audio(reference_audio_file, sr=self.sample_rate, mono=True)
+        ref_duration = len(ref_audio) / ref_sr
+
+        if verbose:
+            print("Generating reference spectrogram image for VLM...")
+        _, spectrogram_buffer = generate_reference_spectrogram_image(
+            reference_audio_file,
+            sr=self.sample_rate,
+        )
+
+        if verbose:
+            print("Calling VLM for reverse-engineering...")
+        return extract_reference_effects(spectrogram_buffer, audio_duration=ref_duration)
+
+    def apply_extracted_effects(
+        self,
+        input_audio: np.ndarray,
+        sample_rate: int,
+        effect_instances: List[EffectInstance],
+        verbose: bool = True,
+    ) -> np.ndarray:
+        """
+        Apply parsed time-varying effects to input audio.
+
+        Args:
+            input_audio: Input waveform
+            sample_rate: Sample rate
+            effect_instances: Parsed effect instances
+            verbose: Whether to print progress logs
+
+        Returns:
+            Processed waveform
+        """
+        if verbose:
+            print("Creating parameter envelopes...")
+        envelope = self.parser.create_parameter_envelope(
+            effect_instances,
+            len(input_audio) / sample_rate,
+            sample_rate,
+        )
+
+        if verbose:
+            print("Applying effects...")
+        return self._apply_effects_with_envelope(input_audio, sample_rate, envelope)
     
     def _apply_effects_with_envelope(
         self,

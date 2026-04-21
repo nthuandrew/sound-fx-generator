@@ -90,25 +90,25 @@ Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 
 ### Phase 2C — Effect Cloning Pipeline Integration
 
 #### Tasks
-- [ ] **Create effect extraction & application workflow**:
+- [x] **Create effect extraction & application workflow**:
   - `extract_reference_effects()`: Call VLM with spectrogram image → receive extracted effect parameters + time segments
   - `apply_extracted_effects()`: Apply extracted parameters (time-varying curves) to input audio using existing effect chain
   - Return cloned audio with reference style applied
 
-- [ ] **Update `core/audio_processor.py`**:
+- [x] **Update `core/audio_processor.py`**:
   - New mode: `mode="extract_and_clone"` (extract from reference, apply to input)
   - Accept both `reference_audio_file` and `input_audio_file`
   - Log extracted parameters for debugging and comparison
   - Output cloned audio with reference effect style
 
-- [ ] **Add CLI support for effect cloning**:
+- [x] **Add CLI support for effect cloning**:
   - New argument: `--mode {generate, extract-and-clone}` (default: generate)
   - When `extract-and-clone`: `--reference-audio reference.wav --input input.wav --output output_cloned.wav`
 
 #### Deliverables
-- [ ] `extract_reference_effects()` function with VLM analysis
-- [ ] Updated `core/audio_processor.py` with cloning mode
-- [ ] Updated `main.py` CLI with `--mode extract-and-clone`
+- [x] `extract_reference_effects()` function with VLM analysis
+- [x] Updated `core/audio_processor.py` with cloning mode
+- [x] Updated `main.py` CLI with `--mode extract-and-clone`
 
 ### Phase 2D — Testing & Validation
 
@@ -132,14 +132,14 @@ Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 
 ### Status
 - [x] Phase 2A core: Spectrogram rendering + VLM integration
 - [x] Phase 2B core: Prompt rewrite + parameter extraction
-- [ ] Phase 2C core: Effect cloning pipeline
+- [x] Phase 2C core: Effect cloning pipeline
 - [ ] Phase 2D testing: Validation + A/B experiments
 
 ### Overall Phase 2 Deliverables
 - [x] Spectrogram visualization module (`utils/spectrogram_renderer.py`)
 - [x] Multimodal VLM-enabled `core/llm_prompt.py`
 - [x] Time-variant parameter extraction & parsing
-- [ ] Effect cloning mode in `core/audio_processor.py` and CLI
+- [x] Effect cloning mode in `core/audio_processor.py` and CLI
 - [ ] Comprehensive unit tests (8+ tests for Phase 2B+C+D)
 - [ ] A/B comparison report demonstrating effect style transfer
 

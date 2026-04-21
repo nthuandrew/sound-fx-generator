@@ -3,6 +3,7 @@ Command-line interface for Sound Effect Generator
 
 Usage:
     python main.py --audio input.wav --prompt "your effect description" --output output.wav
+    python main.py --mode extract-and-clone --audio input.wav --reference-audio reference.wav --output output.wav
 """
 
 import argparse
@@ -25,6 +26,14 @@ Examples:
         """
     )
     
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["generate", "extract-and-clone"],
+        default="generate",
+        help="Processing mode: generate (text-driven) or extract-and-clone (reference effect cloning)"
+    )
+
     parser.add_argument(
         "--audio",
         type=str,
@@ -102,8 +111,12 @@ def process_single_file(args):
         print("Error: --audio is required for single file processing")
         return False
     
-    if not args.prompt:
-        print("Error: --prompt is required for single file processing")
+    if args.mode == "generate" and not args.prompt:
+        print("Error: --prompt is required when --mode generate")
+        return False
+
+    if args.mode == "extract-and-clone" and not args.reference_audio:
+        print("Error: --reference-audio is required when --mode extract-and-clone")
         return False
     
     # Verify input file exists
@@ -124,11 +137,12 @@ def process_single_file(args):
     try:
         output_audio, info = processor.process(
             args.audio,
-            args.prompt,
+            args.prompt or "Reverse-engineer and clone reference effects",
             reference_audio_file=args.reference_audio,
             output_file=args.output,
             normalize=not args.no_normalize,
             verbose=verbose,
+            mode=args.mode,
         )
         
         if verbose:
