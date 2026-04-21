@@ -78,14 +78,14 @@ Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 
     ```
   - Include reference image in multimodal prompt
 
-- [ ] **Extend parameter parser** `core/parameter_parser.py`:
+- [x] **Extend parameter parser** `core/parameter_parser.py`:
   - Add schema validation for extracted time-variant parameters
   - Support per-effect time segmentation with (start_time, end_time) tuples
   - Validate constraint ranges align with effect definitions
 
 #### Deliverables
-- [ ] Reverse-engineering prompt template in `core/llm_prompt.py`
-- [ ] Enhanced parameter parser with time-segment support
+- [x] Reverse-engineering prompt template in `core/llm_prompt.py`
+- [x] Enhanced parameter parser with time-segment support
 
 ### Phase 2C — Effect Cloning Pipeline Integration
 
@@ -130,15 +130,15 @@ Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 
 - [ ] A/B comparison report: reference.wav → extract → clone → compare
 
 ### Status
-- [ ] Phase 2A core: Spectrogram rendering + VLM integration
-- [ ] Phase 2B core: Prompt rewrite + parameter extraction
+- [x] Phase 2A core: Spectrogram rendering + VLM integration
+- [x] Phase 2B core: Prompt rewrite + parameter extraction
 - [ ] Phase 2C core: Effect cloning pipeline
 - [ ] Phase 2D testing: Validation + A/B experiments
 
 ### Overall Phase 2 Deliverables
-- [ ] Spectrogram visualization module (`utils/spectrogram_renderer.py`)
-- [ ] Multimodal VLM-enabled `core/llm_prompt.py`
-- [ ] Time-variant parameter extraction & parsing
+- [x] Spectrogram visualization module (`utils/spectrogram_renderer.py`)
+- [x] Multimodal VLM-enabled `core/llm_prompt.py`
+- [x] Time-variant parameter extraction & parsing
 - [ ] Effect cloning mode in `core/audio_processor.py` and CLI
 - [ ] Comprehensive unit tests (8+ tests for Phase 2B+C+D)
 - [ ] A/B comparison report demonstrating effect style transfer

@@ -24,6 +24,19 @@ from config import (
 from utils.reference_audio import format_reference_context
 
 
+EXTRACTABLE_EFFECTS = set(SUPPORTED_EFFECTS) | {"delay"}
+
+
+def _normalize_effect_type(raw_type: str) -> str:
+    normalized = raw_type.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "lowpass": "low_pass_filter",
+        "low_pass": "low_pass_filter",
+        "lp_filter": "low_pass_filter",
+    }
+    return aliases.get(normalized, normalized)
+
+
 def _call_with_google_genai(full_prompt: str, api_key: str) -> str:
     """Primary Gemini call path using the new google.genai SDK."""
     from google import genai
@@ -497,11 +510,50 @@ def validate_effect_parameters(parameters: Dict) -> None:
         if not isinstance(effect, dict):
             raise ValueError(f"effects[{i}] must be an object")
 
+        # Phase 2B schema: {name/type, time_segments:[...]}
+        if "time_segments" in effect:
+            effect_name = effect.get("name") or effect.get("type")
+            if not isinstance(effect_name, str) or not effect_name.strip():
+                raise ValueError(f"effects[{i}] with time_segments must include 'name' or 'type'")
+
+            normalized = _normalize_effect_type(effect_name)
+            if normalized not in EXTRACTABLE_EFFECTS:
+                raise ValueError(f"effects[{i}] effect '{effect_name}' is not supported for extraction")
+
+            segments = effect["time_segments"]
+            if not isinstance(segments, list) or not segments:
+                raise ValueError(f"effects[{i}].time_segments must be a non-empty list")
+
+            previous_end = None
+            for s_idx, segment in enumerate(segments):
+                if not isinstance(segment, dict):
+                    raise ValueError(f"effects[{i}].time_segments[{s_idx}] must be an object")
+                if "start_time" not in segment or "end_time" not in segment:
+                    raise ValueError(
+                        f"effects[{i}].time_segments[{s_idx}] missing required field start_time/end_time"
+                    )
+
+                start_time = float(segment["start_time"])
+                end_time = float(segment["end_time"])
+                if start_time >= end_time:
+                    raise ValueError(
+                        f"effects[{i}].time_segments[{s_idx}] start_time must be < end_time"
+                    )
+                if previous_end is not None and start_time < previous_end:
+                    raise ValueError(
+                        f"effects[{i}].time_segments must be ordered and non-overlapping"
+                    )
+                previous_end = end_time
+
+            continue
+
+        # Legacy schema: {type, start_time, end_time, ...}
         for required in ["type", "start_time", "end_time"]:
             if required not in effect:
                 raise ValueError(f"effects[{i}] missing required field '{required}'")
 
-        if effect["type"] not in SUPPORTED_EFFECTS:
+        normalized = _normalize_effect_type(str(effect["type"]))
+        if normalized not in SUPPORTED_EFFECTS:
             raise ValueError(f"effects[{i}].type '{effect['type']}' is not supported")
 
 
@@ -512,7 +564,9 @@ def _build_retry_prompt(user_prompt: str, previous_response: str, error_message:
         "Your previous output was invalid JSON and cannot be parsed.\n"
         f"Parse error: {error_message}\n"
         "Return ONLY one valid JSON object. No markdown. No explanation.\n"
-        "JSON must include: {\"effects\": [...]} and each effect must have type/start_time/end_time.\n"
+        "JSON must include {\"effects\": [...]} and use ONE valid schema:\n"
+        "(A) legacy per-effect format: type/start_time/end_time + parameters\n"
+        "(B) phase-2B format: name(or type) + time_segments[{start_time,end_time,...}]\n"
         f"Previous invalid response preview:\n{preview}\n\n"
         f"Original request:\n{user_prompt}"
     )

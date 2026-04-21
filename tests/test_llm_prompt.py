@@ -31,6 +31,48 @@ class TestLLMPromptRobustness(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_effect_parameters({"foo": 1})
 
+    def test_validate_effect_parameters_accepts_time_segments_schema(self):
+      payload = {
+        "effects": [
+          {
+            "name": "Reverb",
+            "time_segments": [
+              {
+                "start_time": 0.0,
+                "end_time": 2.0,
+                "decay_time": 1.2,
+                "wet_dry": 0.3,
+                "width": 0.9,
+              },
+              {
+                "start_time": 2.0,
+                "end_time": 4.0,
+                "decay_time": 2.0,
+                "wet_dry": 0.5,
+                "width": 0.95,
+              },
+            ],
+          }
+        ]
+      }
+      validate_effect_parameters(payload)
+
+    def test_validate_effect_parameters_rejects_unordered_time_segments(self):
+      payload = {
+        "effects": [
+          {
+            "name": "Distortion",
+            "time_segments": [
+              {"start_time": 2.0, "end_time": 3.0, "gain": 2.0, "tone": 0.4},
+              {"start_time": 1.0, "end_time": 2.0, "gain": 1.5, "tone": 0.5},
+            ],
+          }
+        ]
+      }
+
+      with self.assertRaises(ValueError):
+        validate_effect_parameters(payload)
+
     @patch("core.llm_prompt.call_gemini_api")
     def test_generate_effect_parameters_retries_after_invalid_json(self, mock_call):
         # First response is malformed/truncated JSON, second is valid.

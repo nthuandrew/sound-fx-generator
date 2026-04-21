@@ -7,7 +7,6 @@ This module is responsible for:
 - Interpolating time-variant parameter envelopes
 """
 
-import json
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
@@ -83,6 +82,70 @@ class ParameterParser:
             constraints: Optional dictionary of parameter constraints
         """
         self.constraints = constraints or PARAM_CONSTRAINTS
+
+    @staticmethod
+    def _normalize_effect_type(raw_type: str) -> str:
+        """Normalize effect names from model output to internal keys."""
+        normalized = raw_type.strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "lowpass": "low_pass_filter",
+            "low_pass": "low_pass_filter",
+            "lp_filter": "low_pass_filter",
+            "reverb": "reverb",
+            "chorus": "chorus",
+            "distortion": "distortion",
+            "delay": "delay",
+        }
+        return aliases.get(normalized, normalized)
+
+    def _expand_time_segmented_effect(self, effect_dict: Dict) -> List[Dict]:
+        """
+        Convert phase-2B schema effect (`name` + `time_segments`) into legacy
+        effect instances (`type`, `start_time`, `end_time`, param envelopes).
+        """
+        if "time_segments" not in effect_dict:
+            return [effect_dict]
+
+        effect_name = effect_dict.get("type") or effect_dict.get("name")
+        if not isinstance(effect_name, str) or not effect_name.strip():
+            raise ValueError("Time-segmented effect must include 'name' (or 'type')")
+
+        segments = effect_dict.get("time_segments")
+        if not isinstance(segments, list) or not segments:
+            raise ValueError("time_segments must be a non-empty list")
+
+        normalized_type = self._normalize_effect_type(effect_name)
+        expanded: List[Dict] = []
+
+        for idx, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                raise ValueError(f"time_segments[{idx}] must be an object")
+
+            if "start_time" not in segment or "end_time" not in segment:
+                raise ValueError(f"time_segments[{idx}] missing start_time/end_time")
+
+            item = {
+                "type": normalized_type,
+                "start_time": float(segment["start_time"]),
+                "end_time": float(segment["end_time"]),
+            }
+
+            for param_name, param_value in segment.items():
+                if param_name in {"start_time", "end_time"}:
+                    continue
+
+                if isinstance(param_value, dict) and "start" in param_value and "end" in param_value:
+                    item[param_name] = {
+                        "start": float(param_value["start"]),
+                        "end": float(param_value["end"]),
+                    }
+                elif isinstance(param_value, (int, float)):
+                    value = float(param_value)
+                    item[param_name] = {"start": value, "end": value}
+
+            expanded.append(item)
+
+        return expanded
     
     def validate_parameter_value(
         self,
@@ -162,13 +225,17 @@ class ParameterParser:
             if field not in effect_dict:
                 raise ValueError(f"Missing required field: {field}")
         
-        effect_type = effect_dict["type"]
+        effect_type = self._normalize_effect_type(str(effect_dict["type"]))
         start_time = float(effect_dict["start_time"])
         end_time = float(effect_dict["end_time"])
         
         # Validate time order
         if start_time >= end_time:
             raise ValueError(f"start_time ({start_time}) must be less than end_time ({end_time})")
+
+        # Validate effect support at parser level.
+        if effect_type not in self.constraints:
+            raise ValueError(f"Unsupported effect type for parsing: {effect_type}")
         
         # Clamp times if audio_duration provided
         if audio_duration:
@@ -244,10 +311,12 @@ class ParameterParser:
             raise ValueError("'effects' must be a list")
         
         effect_instances = []
-        for effect_dict in llm_output["effects"]:
+        for raw_effect in llm_output["effects"]:
             try:
-                effect = self.parse_effect_instance(effect_dict, audio_duration)
-                effect_instances.append(effect)
+                expanded = self._expand_time_segmented_effect(raw_effect)
+                for effect_dict in expanded:
+                    effect = self.parse_effect_instance(effect_dict, audio_duration)
+                    effect_instances.append(effect)
             except ValueError as e:
                 print(f"Warning: Failed to parse effect: {e}")
                 continue
