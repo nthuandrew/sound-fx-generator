@@ -17,6 +17,7 @@ from effects import (
 )
 from utils.audio_io import load_audio, save_audio, normalize_audio
 from utils.evaluation import compute_spectral_distance
+from utils.reference_audio import analyze_reference_audio
 import config
 
 
@@ -57,6 +58,7 @@ class AudioProcessor:
         self,
         audio_file: str,
         text_prompt: str,
+        reference_audio_file: Optional[str] = None,
         output_file: Optional[str] = None,
         normalize: bool = True,
         verbose: bool = True,
@@ -67,6 +69,7 @@ class AudioProcessor:
         Args:
             audio_file: Path to input audio file
             text_prompt: Text description of desired effects
+            reference_audio_file: Optional path to a reference audio file
             output_file: Optional path to save output audio
             normalize: Whether to normalize output audio
             verbose: Whether to print processing steps
@@ -85,15 +88,29 @@ class AudioProcessor:
             processing_info["sample_rate"] = sr
         except Exception as e:
             raise RuntimeError(f"Failed to load audio: {str(e)}")
+
+        reference_context = None
+        if reference_audio_file:
+            if verbose:
+                print(f"Analyzing reference audio from {reference_audio_file}...")
+            try:
+                reference_context = analyze_reference_audio(reference_audio_file, sr=self.sample_rate)
+                processing_info["reference_audio_file"] = reference_audio_file
+                processing_info["reference_context"] = reference_context.to_dict()
+            except Exception as e:
+                raise RuntimeError(f"Failed to analyze reference audio: {str(e)}")
         
         # Step 2: Generate effect parameters from text prompt
         if verbose:
             print(f"Generating effect parameters from prompt...")
             print(f"  Prompt: \"{text_prompt}\"")
+            if reference_audio_file:
+                print(f"  Reference audio: {reference_audio_file}")
         try:
             llm_output = generate_effect_parameters(
                 text_prompt,
                 audio_duration=len(audio) / sr,
+                reference_context=reference_context.to_dict() if reference_context else None,
             )
             processing_info["llm_output"] = llm_output
         except Exception as e:

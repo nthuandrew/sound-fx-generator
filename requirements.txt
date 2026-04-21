@@ -8,3 +8,4 @@ flask>=2.0
 torch>=2.0
 torchaudio>=2.0
 transformers>=4.30
+matplotlib>=3.5.0

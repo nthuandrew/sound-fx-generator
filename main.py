@@ -44,6 +44,13 @@ Examples:
         default=None,
         help="Output audio file path (default: input_processed.wav)"
     )
+
+    parser.add_argument(
+        "--reference-audio",
+        type=str,
+        default=None,
+        help="Optional reference audio file used to extract spectrogram context"
+    )
     
     parser.add_argument(
         "--sr",
@@ -118,6 +125,7 @@ def process_single_file(args):
         output_audio, info = processor.process(
             args.audio,
             args.prompt,
+            reference_audio_file=args.reference_audio,
             output_file=args.output,
             normalize=not args.no_normalize,
             verbose=verbose,

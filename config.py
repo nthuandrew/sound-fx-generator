@@ -4,6 +4,7 @@ Global configuration for the Sound Effect Generator system.
 
 # LLM Configuration
 LLM_MODEL = "gemini-2.5-flash"  # Using Gemini API (free for students)
+LLM_MODEL_VISION = "gemini-2.5-pro"  # Multimodal model for spectrogram analysis
 LLM_TEMPERATURE = 0.5  # Lower temp for more consistent JSON output
 LLM_MAX_TOKENS = 4096  # Increased for complete JSON responses
 LLM_MAX_RETRIES = 3

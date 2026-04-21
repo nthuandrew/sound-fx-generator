@@ -22,20 +22,126 @@ Make the current text-to-parameter-to-audio pipeline robust and reproducible.
 
 ---
 
-## Phase 2 — Reference Audio Conditioning (Spectrogram Shortcut)
+## Phase 2 — Audio Effect Style Transfer & Reverse Engineering (VLM Spectrogram Analysis)
 
 ### Goal
-Enable context-aware generation by conditioning on reference audio, starting from spectrogram inputs.
+Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 Pro) to reverse-engineer reference audio's effects and parameters from spectrogram visualization, then apply extracted parameters to input audio.
 
-### Tasks
-- Add a preprocessing module to convert reference audio into mel-spectrogram images.
-- Extend prompt/template to include reference context cues from spectrogram summaries.
-- Compare **text-only** vs **text + reference spectrogram** generation quality.
-- Log generated parameter differences and resulting audio behavior.
+### Conceptual Shift
+| Dimension | Previous (Heuristic Context) | **New (Spectrogram Reverse Engineering)** |
+|-----------|------------------------------|---------------------------------------------|
+| Reference Role | Background info (mood) | **Target blueprint** (effect analysis) |
+| Analysis Method | DSP stats (RMS, centroids) → text | **Visual features** (spectrogram image) |
+| LLM Task | "Create" parameters based on vibes | **"Reverse-engineer"** actual effects used |
+| Goal | Prompt conditioning | **Effect cloning / style transfer** |
 
-### Deliverables
-- End-to-end reference-audio-assisted generation prototype.
-- A/B comparison examples (without and with reference input).
+### Phase 2A — Spectrogram Visualization & VLM Integration
+
+#### Tasks
+- [x] **Remove legacy DSP module**: Delete heuristic context (RMS, Centroid, Rolloff calculations from `utils/reference_audio.py`). Keep audio loading and segmentation.
+- [x] **Add spectrogram visualization**: New function `generate_reference_spectrogram_image()` that:
+  - Reads reference.wav with librosa
+  - Computes short-time Fourier transform (STFT) → magnitude spectrogram
+  - Uses **linear frequency** and **linear magnitude** scales (per ST-ITO ablation study)
+  - Applies **viridis colormap**
+  - Preserves X (time) and Y (frequency) axes without colorbar (prevents visual interference)
+  - Returns image as **byte buffer** (PNG in memory, ready for VLM API)
+- [x] **Upgrade LLM client to support multimodal**: 
+  - Switch to `Gemini 2.5 Pro` (or `Gemini 2.0 Flash` as fallback if needed)
+  - Extend `core/llm_prompt.py` to accept image input alongside text
+  - Support `genai.upload_file()` or direct base64 encoding for spectrogram image
+  - Add robust error handling for multimodal API responses
+
+#### Deliverables
+- [x] `utils/spectrogram_renderer.py`: Pure visualization module (no analysis, just rendering)
+- [x] Updated `core/llm_prompt.py` with VLM support and image input handling
+
+### Phase 2B — Prompt Rewrite & Parameter Extraction
+
+#### Tasks
+- [x] **Rewrite prompt to reverse-engineering mode**:
+  - Reposition LLM as "professional audio engineer" analyzing spectrogram
+  - Explicitly ask for effect identification: Reverb (tail decay), Delay (echo patterns), Distortion (harmonic spread), EQ (spectral shaping)
+  - Request **time-variant parameter extraction** in JSON:
+    ```json
+    {
+      "effects": [
+        {
+          "name": "Reverb",
+          "time_segments": [
+            { "start_time": 0.0, "end_time": 5.0, "decay_time": 1.5, "wet_dry": 0.3, "width": 0.9 },
+            { "start_time": 5.0, "end_time": 10.0, "decay_time": 2.5, "wet_dry": 0.5, "width": 0.95 }
+          ]
+        }
+      ]
+    }
+    ```
+  - Include reference image in multimodal prompt
+
+- [ ] **Extend parameter parser** `core/parameter_parser.py`:
+  - Add schema validation for extracted time-variant parameters
+  - Support per-effect time segmentation with (start_time, end_time) tuples
+  - Validate constraint ranges align with effect definitions
+
+#### Deliverables
+- [ ] Reverse-engineering prompt template in `core/llm_prompt.py`
+- [ ] Enhanced parameter parser with time-segment support
+
+### Phase 2C — Effect Cloning Pipeline Integration
+
+#### Tasks
+- [ ] **Create effect extraction & application workflow**:
+  - `extract_reference_effects()`: Call VLM with spectrogram image → receive extracted effect parameters + time segments
+  - `apply_extracted_effects()`: Apply extracted parameters (time-varying curves) to input audio using existing effect chain
+  - Return cloned audio with reference style applied
+
+- [ ] **Update `core/audio_processor.py`**:
+  - New mode: `mode="extract_and_clone"` (extract from reference, apply to input)
+  - Accept both `reference_audio_file` and `input_audio_file`
+  - Log extracted parameters for debugging and comparison
+  - Output cloned audio with reference effect style
+
+- [ ] **Add CLI support for effect cloning**:
+  - New argument: `--mode {generate, extract-and-clone}` (default: generate)
+  - When `extract-and-clone`: `--reference-audio reference.wav --input input.wav --output output_cloned.wav`
+
+#### Deliverables
+- [ ] `extract_reference_effects()` function with VLM analysis
+- [ ] Updated `core/audio_processor.py` with cloning mode
+- [ ] Updated `main.py` CLI with `--mode extract-and-clone`
+
+### Phase 2D — Testing & Validation
+
+#### Tasks
+- [ ] **Update unit tests**:
+  - `test_spectrogram_rendering()`: Verify spectrogram image generation (dimensions, colormap)
+  - `test_vlm_multimodal_call()`: Mock VLM response with time-variant parameters
+  - `test_parameter_extraction_time_segments()`: Validate parser handles (start_time, end_time) correctly
+  - `test_effect_cloning_pipeline()`: End-to-end test: extract from reference → apply to input → verify output
+
+- [ ] **Manual A/B testing**:
+  - Compare **original reference** vs **extracted + re-applied cloned version** (should be ~90%+ similar)
+  - Compare **text-only generation** vs **VLM reverse-engineered cloning** (quality, parameter fidelity)
+  - Create example report with parameter tables
+
+#### Deliverables
+- [ ] `tests/test_spectrogram_renderer.py` (4+ tests)
+- [ ] Updated `tests/test_llm_prompt.py` with multimodal tests
+- [ ] A/B comparison report: reference.wav → extract → clone → compare
+
+### Status
+- [ ] Phase 2A core: Spectrogram rendering + VLM integration
+- [ ] Phase 2B core: Prompt rewrite + parameter extraction
+- [ ] Phase 2C core: Effect cloning pipeline
+- [ ] Phase 2D testing: Validation + A/B experiments
+
+### Overall Phase 2 Deliverables
+- [ ] Spectrogram visualization module (`utils/spectrogram_renderer.py`)
+- [ ] Multimodal VLM-enabled `core/llm_prompt.py`
+- [ ] Time-variant parameter extraction & parsing
+- [ ] Effect cloning mode in `core/audio_processor.py` and CLI
+- [ ] Comprehensive unit tests (8+ tests for Phase 2B+C+D)
+- [ ] A/B comparison report demonstrating effect style transfer
 
 ---
 
