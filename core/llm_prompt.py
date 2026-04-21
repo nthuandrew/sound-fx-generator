@@ -9,9 +9,53 @@ This module handles:
 
 import json
 import os
-from typing import Dict, List, Optional
-import google.generativeai as genai
-from config import LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS
+from typing import Dict, Optional
+from config import (
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    LLM_MAX_TOKENS,
+    LLM_MAX_RETRIES,
+    LLM_JSON_PREVIEW_CHARS,
+    SUPPORTED_EFFECTS,
+)
+
+def _call_with_google_genai(full_prompt: str, api_key: str) -> str:
+    """Primary Gemini call path using the new google.genai SDK."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=LLM_MODEL,
+        contents=full_prompt,
+        config={
+            "temperature": LLM_TEMPERATURE,
+            "max_output_tokens": LLM_MAX_TOKENS,
+        },
+    )
+
+    text = getattr(response, "text", None)
+    if not text:
+        raise RuntimeError("google.genai returned an empty response text")
+    return text
+
+
+def _call_with_legacy_google_generativeai(full_prompt: str, api_key: str) -> str:
+    """Fallback Gemini call path using deprecated google.generativeai SDK."""
+    import google.generativeai as legacy_genai
+
+    legacy_genai.configure(api_key=api_key)
+    model = legacy_genai.GenerativeModel(LLM_MODEL)
+    response = model.generate_content(
+        full_prompt,
+        generation_config=legacy_genai.types.GenerationConfig(
+            temperature=LLM_TEMPERATURE,
+            max_output_tokens=LLM_MAX_TOKENS,
+        ),
+    )
+
+    if not getattr(response, "text", None):
+        raise RuntimeError("google.generativeai returned an empty response text")
+    return response.text
 
 
 class LLMPromptGenerator:
@@ -118,25 +162,23 @@ def call_gemini_api(prompt: str, system_prompt: Optional[str] = None) -> str:
             "Please set it with: export GEMINI_API_KEY='your-key'"
         )
     
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(LLM_MODEL)
-    
     # Prepare messages with system prompt
     full_prompt = prompt
     if system_prompt:
         full_prompt = f"{system_prompt}\n\n{prompt}"
     
     try:
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=LLM_TEMPERATURE,
-                max_output_tokens=LLM_MAX_TOKENS,
-            ),
-        )
-        return response.text
-    except Exception as e:
-        raise RuntimeError(f"Gemini API call failed: {str(e)}")
+        return _call_with_google_genai(full_prompt, api_key)
+    except Exception as new_sdk_error:
+        # Keep backward compatibility as a fallback path.
+        try:
+            return _call_with_legacy_google_generativeai(full_prompt, api_key)
+        except Exception as legacy_error:
+            raise RuntimeError(
+                "Gemini API call failed for both SDKs. "
+                f"google.genai error: {new_sdk_error}; "
+                f"google.generativeai fallback error: {legacy_error}"
+            )
 
 
 def extract_json_from_response(response_text: str) -> Dict:
@@ -153,52 +195,84 @@ def extract_json_from_response(response_text: str) -> Dict:
     Raises:
         ValueError: If valid JSON cannot be extracted
     """
-    # Remove markdown code block markers if present
-    cleaned = response_text
-    if cleaned.strip().startswith("```json"):
-        cleaned = cleaned.strip()[7:]  # Remove ```json
-    if cleaned.strip().startswith("```"):
-        cleaned = cleaned.strip()[3:]  # Remove ```
-    if cleaned.strip().endswith("```"):
-        cleaned = cleaned.strip()[:-3]  # Remove trailing ```
-    
-    # First try direct JSON parsing
+    cleaned = response_text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    # First try direct parse.
     try:
-        return json.loads(cleaned.strip())
+        return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
-    
-    # Try to find JSON object in the response
-    start_idx = cleaned.find("{")
-    end_idx = cleaned.rfind("}") + 1
-    
-    if start_idx == -1 or end_idx == 0:
-        raise ValueError(f"No JSON object found in response: {cleaned[:100]}")
-    
-    json_str = cleaned[start_idx:end_idx]
-    
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError as e:
-        # Try to repair by ensuring proper closing brackets
-        depth = 0
-        repaired = ""
-        for char in json_str:
-            if char == "{" or char == "[":
-                depth += 1
-            elif char == "}" or char == "]":
-                depth -= 1
-            repaired += char
-        
-        # Close any unclosed brackets
-        while depth > 0:
-            repaired += "}"
-            depth -= 1
-        
+
+    # Robust parse: find the first complete JSON object inside any surrounding text.
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(cleaned):
+        if char != "{":
+            continue
         try:
-            return json.loads(repaired)
+            obj, _ = decoder.raw_decode(cleaned[idx:])
+            if isinstance(obj, dict):
+                return obj
         except json.JSONDecodeError:
-            raise ValueError(f"Failed to parse JSON: {str(e)}\nJSON string: {json_str[:200]}")
+            continue
+
+    # Helpful diagnostics for truncated / malformed response.
+    snippet = cleaned[:LLM_JSON_PREVIEW_CHARS]
+    if "{" in cleaned and "}" not in cleaned:
+        raise ValueError(
+            "Failed to parse JSON: response appears truncated (missing closing braces). "
+            f"Response preview: {snippet}"
+        )
+
+    raise ValueError(f"Failed to parse JSON: no valid JSON object found. Response preview: {snippet}")
+
+
+def validate_effect_parameters(parameters: Dict) -> None:
+    """
+    Validate minimal schema of generated parameters.
+
+    Args:
+        parameters: Parsed JSON dictionary
+
+    Raises:
+        ValueError: If schema is invalid
+    """
+    if not isinstance(parameters, dict):
+        raise ValueError("Output must be a JSON object")
+
+    effects = parameters.get("effects")
+    if not isinstance(effects, list):
+        raise ValueError("Output JSON must contain an 'effects' list")
+
+    for i, effect in enumerate(effects):
+        if not isinstance(effect, dict):
+            raise ValueError(f"effects[{i}] must be an object")
+
+        for required in ["type", "start_time", "end_time"]:
+            if required not in effect:
+                raise ValueError(f"effects[{i}] missing required field '{required}'")
+
+        if effect["type"] not in SUPPORTED_EFFECTS:
+            raise ValueError(f"effects[{i}].type '{effect['type']}' is not supported")
+
+
+def _build_retry_prompt(user_prompt: str, previous_response: str, error_message: str) -> str:
+    """Build a stricter retry prompt when prior output was malformed."""
+    preview = previous_response[:LLM_JSON_PREVIEW_CHARS]
+    return (
+        "Your previous output was invalid JSON and cannot be parsed.\n"
+        f"Parse error: {error_message}\n"
+        "Return ONLY one valid JSON object. No markdown. No explanation.\n"
+        "JSON must include: {\"effects\": [...]} and each effect must have type/start_time/end_time.\n"
+        f"Previous invalid response preview:\n{preview}\n\n"
+        f"Original request:\n{user_prompt}"
+    )
 
 
 def generate_effect_parameters(
@@ -215,14 +289,26 @@ def generate_effect_parameters(
     Returns:
         Dictionary containing effect sequence with time-variant parameters
     """
-    # Generate prompt
     generator = LLMPromptGenerator()
     full_prompt = generator.generate_prompt(user_description, audio_duration)
-    
-    # Call LLM API
-    response = call_gemini_api(full_prompt, system_prompt=generator.system_prompt)
-    
-    # Parse and validate response
-    parameters = extract_json_from_response(response)
-    
-    return parameters
+
+    current_prompt = full_prompt
+    last_error: Optional[str] = None
+
+    for attempt in range(1, LLM_MAX_RETRIES + 1):
+        response = call_gemini_api(current_prompt, system_prompt=generator.system_prompt)
+
+        try:
+            parameters = extract_json_from_response(response)
+            validate_effect_parameters(parameters)
+            return parameters
+        except ValueError as e:
+            last_error = str(e)
+            if attempt == LLM_MAX_RETRIES:
+                break
+            current_prompt = _build_retry_prompt(full_prompt, response, str(e))
+
+    raise ValueError(
+        f"Failed to generate valid effect parameters after {LLM_MAX_RETRIES} attempts. "
+        f"Last error: {last_error}"
+    )

@@ -6,6 +6,8 @@ Global configuration for the Sound Effect Generator system.
 LLM_MODEL = "gemini-2.5-flash"  # Using Gemini API (free for students)
 LLM_TEMPERATURE = 0.5  # Lower temp for more consistent JSON output
 LLM_MAX_TOKENS = 4096  # Increased for complete JSON responses
+LLM_MAX_RETRIES = 3
+LLM_JSON_PREVIEW_CHARS = 300
 
 # Audio Configuration
 DEFAULT_SR = 44100 # Default sample rate

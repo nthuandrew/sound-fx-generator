@@ -33,14 +33,14 @@ class AudioProcessor:
         "low_pass_filter": LowPassFilterEffect,
     }
     
-    def __init__(self):
+    def __init__(self, sample_rate: Optional[int] = None):
         """
         Initialize audio processor.
         
         Args:
             sample_rate: Audio sample rate in Hz
         """
-        self.sample_rate = config.DEFAULT_SR
+        self.sample_rate = sample_rate or config.DEFAULT_SR
         self.parser = ParameterParser()
         self.effects = {}
         self._initialize_effects()
