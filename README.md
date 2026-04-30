@@ -25,7 +25,10 @@ Output Audio + Evaluation Metrics
 - **Natural Language Interface**: Users describe desired effects in plain English
 - **Time-Variant Effects**: Support for dynamic parameter changes over time
 - **Multiple Effects**: Reverb, Chorus, Distortion, Low-pass Filter
+- **Reference Audio Support**: Analyze and use reference audio for effect extraction and cloning
+- **2D Envelope Editor**: Interactive web UI for editing time-varying effect parameters with draggable control points
 - **Evaluation Metrics**: Energy analysis, Dynamic range, Peak levels, Spectral changes
+- **Interactive Web UI**: Upload `.wav` + prompt (+ optional reference audio), preview/play uploaded input audio, auto-fill all effect bars, tweak sliders, regenerate and play output
 
 ## Project Structure
 
@@ -45,10 +48,72 @@ sound-fx-generator/
 │   ├── audio_io.py         # Audio loading/saving
 │   └── evaluation.py       # Evaluation metrics
 ├── output/                   # Processed audio outputs
+├── web/                     # Web frontend assets
+│   ├── templates/
+│   │   └── index.html       # Main UI page
+│   ├── static/
+│   │   ├── app.js           # Frontend logic (bars/UI/API)
+│   │   ├── styles.css
+│   │   └── generated/       # Generated audio files served to browser
+│   └── uploads/             # Uploaded source/reference files (runtime)
+├── web_app.py               # Flask backend for interactive UI
 ├── main.py                 # CLI entry point
 ├── config.py               # Global configuration
 └── input.wav                 # Example input audio
 ```
+
+## Web App (Interactive UI)
+
+### What it supports
+
+- Upload one input `.wav`
+- Preview and play the uploaded input audio file before generation
+- Enter text prompt
+- Optionally upload reference audio `.wav`
+- Choose mode:
+  - `generate` (text-driven)
+  - `extract-and-clone` (reference-driven, requires reference audio)
+- Auto-populate all effect parameter bars from generated output
+- Manually adjust bars and regenerate output from parameters
+- Play output audio directly in browser and download `.wav`
+
+
+### Run locally
+
+```bash
+pip install -r requirements.txt
+```
+
+Set environment variables (e.g., Google API Key in `.env` if needed)
+
+```bash
+python web_app.py
+```
+
+Open your browser and go to [http://localhost:5000](http://localhost:5000) to use the web interface
+
+> To change the port, modify the `port` parameter in `web_app.py`.
+
+### Backend API Summary
+
+- `GET /api/effects-spec`: parameter ranges for all effects
+- `POST /api/generate`: initial generation from prompt/reference
+- `POST /api/regenerate`: regenerate from bar/slider values
+- `GET /api/audio/<filename>`: stream generated wav
+
+### Deployment (Cloud)
+
+Use any Python web host (Render / Railway / Fly.io / VM):
+
+1. Set environment variable `GEMINI_API_KEY`
+2. Install dependencies with `requirements.txt`
+3. Start command:
+
+```bash
+gunicorn -w 2 -b 0.0.0.0:$PORT web_app:app
+```
+
+If platform does not provide `$PORT`, replace it with a fixed port (e.g., `8000`).
 
 ## Examples
 

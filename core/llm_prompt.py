@@ -9,15 +9,21 @@ This module handles:
 
 import json
 import os
+import re
+import time
 from io import BytesIO
 from typing import Dict, Optional, Union
 
 from config import (
+    LLM_API_MAX_ATTEMPTS,
+    LLM_API_RETRY_BASE_SECONDS,
+    LLM_API_RETRY_MAX_SECONDS,
     LLM_JSON_PREVIEW_CHARS,
     LLM_MAX_RETRIES,
     LLM_MAX_TOKENS,
     LLM_MODEL,
     LLM_MODEL_VISION,
+    LLM_MODEL_VISION_FALLBACK,
     LLM_TEMPERATURE,
     SUPPORTED_EFFECTS,
 )
@@ -35,6 +41,44 @@ def _normalize_effect_type(raw_type: str) -> str:
         "lp_filter": "low_pass_filter",
     }
     return aliases.get(normalized, normalized)
+
+
+def _is_transient_api_error(*errors: Exception) -> bool:
+    text = " ".join(str(e).upper() for e in errors if e is not None)
+    transient_markers = (
+        "429",
+        "503",
+        "UNAVAILABLE",
+        "RESOURCE_EXHAUSTED",
+        "QUOTA",
+        "RATE_LIMIT",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
+def _extract_retry_delay_seconds(*errors: Exception) -> Optional[float]:
+    text = " ".join(str(e) for e in errors if e is not None)
+
+    # e.g. "Please retry in 58.141799772s"
+    match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", text, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+
+    # e.g. "retry_delay { seconds: 58 }"
+    match = re.search(r"retry_delay\s*\{[^}]*seconds:\s*([0-9]+)", text, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+
+    return None
+
+
+def _compute_retry_sleep_seconds(attempt_index: int, *errors: Exception) -> float:
+    hinted = _extract_retry_delay_seconds(*errors)
+    if hinted is not None:
+        return min(float(hinted) + 1.0, float(LLM_API_RETRY_MAX_SECONDS))
+
+    expo = float(LLM_API_RETRY_BASE_SECONDS) * (2 ** attempt_index)
+    return min(expo, float(LLM_API_RETRY_MAX_SECONDS))
 
 
 def _call_with_google_genai(full_prompt: str, api_key: str) -> str:
@@ -58,8 +102,8 @@ def _call_with_google_genai(full_prompt: str, api_key: str) -> str:
 
 
 def _call_with_legacy_google_generativeai(full_prompt: str, api_key: str) -> str:
-    """Fallback Gemini call path using deprecated google.generativeai SDK."""
-    import google.generativeai as legacy_genai
+    """Fallback Gemini call path using deprecated google.genai SDK."""
+    import google.genai as legacy_genai
 
     legacy_genai.configure(api_key=api_key)
     model = legacy_genai.GenerativeModel(LLM_MODEL)
@@ -72,7 +116,7 @@ def _call_with_legacy_google_generativeai(full_prompt: str, api_key: str) -> str
     )
 
     if not getattr(response, "text", None):
-        raise RuntimeError("google.generativeai returned an empty response text")
+        raise RuntimeError("google.genai returned an empty response text")
     return response.text
 
 
@@ -80,6 +124,7 @@ def _call_with_google_genai_multimodal(
     prompt: str,
     image_buffer: BytesIO,
     api_key: str,
+    model_name: str = LLM_MODEL_VISION,
 ) -> str:
     """Multimodal Gemini call using google.genai SDK with vision model."""
     from google import genai
@@ -92,7 +137,7 @@ def _call_with_google_genai_multimodal(
 
     # Create multimodal content with text + image
     response = client.models.generate_content(
-        model=LLM_MODEL_VISION,
+        model=model_name,
         contents=[
             prompt,
             {"inline_data": {"mime_type": "image/png", "data": image_bytes}},
@@ -113,12 +158,13 @@ def _call_with_legacy_google_generativeai_multimodal(
     prompt: str,
     image_buffer: BytesIO,
     api_key: str,
+    model_name: str = LLM_MODEL_VISION,
 ) -> str:
-    """Fallback multimodal Gemini call using deprecated google.generativeai SDK."""
-    import google.generativeai as legacy_genai
+    """Fallback multimodal Gemini call using deprecated google.genai SDK."""
+    import google.genai as legacy_genai
 
     legacy_genai.configure(api_key=api_key)
-    model = legacy_genai.GenerativeModel(LLM_MODEL_VISION)
+    model = legacy_genai.GenerativeModel(model_name)
 
     # Read image bytes
     image_buffer.seek(0)
@@ -133,7 +179,7 @@ def _call_with_legacy_google_generativeai_multimodal(
     )
 
     if not getattr(response, "text", None):
-        raise RuntimeError("google.generativeai multimodal fallback returned empty response")
+        raise RuntimeError("google.genai multimodal fallback returned empty response")
     return response.text
 
 
@@ -382,17 +428,35 @@ def call_gemini_api(prompt: str, system_prompt: Optional[str] = None) -> str:
     if system_prompt:
         full_prompt = f"{system_prompt}\n\n{prompt}"
 
-    try:
-        return _call_with_google_genai(full_prompt, api_key)
-    except Exception as new_sdk_error:
+    last_new_sdk_error: Optional[Exception] = None
+    last_legacy_error: Optional[Exception] = None
+
+    for attempt in range(LLM_API_MAX_ATTEMPTS):
         try:
-            return _call_with_legacy_google_generativeai(full_prompt, api_key)
-        except Exception as legacy_error:
-            raise RuntimeError(
-                "Gemini API call failed for both SDKs. "
-                f"google.genai error: {new_sdk_error}; "
-                f"google.generativeai fallback error: {legacy_error}"
-            )
+            return _call_with_google_genai(full_prompt, api_key)
+        except Exception as new_sdk_error:
+            last_new_sdk_error = new_sdk_error
+            try:
+                return _call_with_legacy_google_generativeai(full_prompt, api_key)
+            except Exception as legacy_error:
+                last_legacy_error = legacy_error
+
+                should_retry = _is_transient_api_error(new_sdk_error, legacy_error)
+                if should_retry and attempt < LLM_API_MAX_ATTEMPTS - 1:
+                    time.sleep(_compute_retry_sleep_seconds(attempt, new_sdk_error, legacy_error))
+                    continue
+
+                raise RuntimeError(
+                    "Gemini API call failed for both SDKs. "
+                    f"google.genai error: {new_sdk_error}; "
+                    f"google.generativeai fallback error: {legacy_error}"
+                )
+
+    raise RuntimeError(
+        "Gemini API call failed after retries. "
+        f"Last google.genai error: {last_new_sdk_error}; "
+        f"Last legacy error: {last_legacy_error}"
+    )
 
 
 def call_gemini_vision_api(
@@ -427,17 +491,77 @@ def call_gemini_vision_api(
     if system_prompt:
         full_prompt = f"{system_prompt}\n\n{prompt}"
 
-    try:
-        return _call_with_google_genai_multimodal(full_prompt, image_buffer, api_key)
-    except Exception as new_sdk_error:
+    def _is_quota_error(err: Exception) -> bool:
+        text = str(err).upper()
+        return "429" in text or "RESOURCE_EXHAUSTED" in text or "QUOTA" in text
+
+    last_new_sdk_error: Optional[Exception] = None
+    last_legacy_error: Optional[Exception] = None
+
+    for attempt in range(LLM_API_MAX_ATTEMPTS):
         try:
-            return _call_with_legacy_google_generativeai_multimodal(full_prompt, image_buffer, api_key)
-        except Exception as legacy_error:
-            raise RuntimeError(
-                "Gemini Vision API call failed for both SDKs. "
-                f"google.genai error: {new_sdk_error}; "
-                f"google.generativeai fallback error: {legacy_error}"
+            return _call_with_google_genai_multimodal(
+                full_prompt,
+                image_buffer,
+                api_key,
+                model_name=LLM_MODEL_VISION,
             )
+        except Exception as new_sdk_error:
+            # Try a cheaper/fallback multimodal model when pro quota is exhausted.
+            if _is_quota_error(new_sdk_error) and LLM_MODEL_VISION_FALLBACK != LLM_MODEL_VISION:
+                try:
+                    return _call_with_google_genai_multimodal(
+                        full_prompt,
+                        image_buffer,
+                        api_key,
+                        model_name=LLM_MODEL_VISION_FALLBACK,
+                    )
+                except Exception as fallback_new_sdk_error:
+                    new_sdk_error = RuntimeError(
+                        f"primary model failed: {new_sdk_error}; fallback model failed: {fallback_new_sdk_error}"
+                    )
+
+            last_new_sdk_error = new_sdk_error
+
+            try:
+                return _call_with_legacy_google_generativeai_multimodal(
+                    full_prompt,
+                    image_buffer,
+                    api_key,
+                    model_name=LLM_MODEL_VISION,
+                )
+            except Exception as legacy_error:
+                if _is_quota_error(legacy_error) and LLM_MODEL_VISION_FALLBACK != LLM_MODEL_VISION:
+                    try:
+                        return _call_with_legacy_google_generativeai_multimodal(
+                            full_prompt,
+                            image_buffer,
+                            api_key,
+                            model_name=LLM_MODEL_VISION_FALLBACK,
+                        )
+                    except Exception as fallback_legacy_error:
+                        legacy_error = RuntimeError(
+                            f"legacy primary model failed: {legacy_error}; "
+                            f"legacy fallback model failed: {fallback_legacy_error}"
+                        )
+
+                last_legacy_error = legacy_error
+                should_retry = _is_transient_api_error(new_sdk_error, legacy_error)
+                if should_retry and attempt < LLM_API_MAX_ATTEMPTS - 1:
+                    time.sleep(_compute_retry_sleep_seconds(attempt, new_sdk_error, legacy_error))
+                    continue
+
+                raise RuntimeError(
+                    "Gemini Vision API call failed for both SDKs. "
+                    f"google.genai error: {new_sdk_error}; "
+                    f"google.generativeai fallback error: {legacy_error}"
+                )
+
+    raise RuntimeError(
+        "Gemini Vision API call failed after retries. "
+        f"Last google.genai error: {last_new_sdk_error}; "
+        f"Last legacy error: {last_legacy_error}"
+    )
 
 
 def extract_json_from_response(response_text: str) -> Dict:

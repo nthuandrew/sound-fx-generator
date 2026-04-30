@@ -113,35 +113,35 @@ Evolve from context-aware generation to **effect cloning**: Use VLM (Gemini 2.5 
 ### Phase 2D — Testing & Validation
 
 #### Tasks
-- [ ] **Update unit tests**:
+- [x] **Update unit tests**:
   - `test_spectrogram_rendering()`: Verify spectrogram image generation (dimensions, colormap)
   - `test_vlm_multimodal_call()`: Mock VLM response with time-variant parameters
   - `test_parameter_extraction_time_segments()`: Validate parser handles (start_time, end_time) correctly
   - `test_effect_cloning_pipeline()`: End-to-end test: extract from reference → apply to input → verify output
 
-- [ ] **Manual A/B testing**:
+- [x] **Manual A/B testing**:
   - Compare **original reference** vs **extracted + re-applied cloned version** (should be ~90%+ similar)
   - Compare **text-only generation** vs **VLM reverse-engineered cloning** (quality, parameter fidelity)
   - Create example report with parameter tables
 
 #### Deliverables
-- [ ] `tests/test_spectrogram_renderer.py` (4+ tests)
-- [ ] Updated `tests/test_llm_prompt.py` with multimodal tests
-- [ ] A/B comparison report: reference.wav → extract → clone → compare
+- [x] `tests/test_spectrogram_renderer.py` (4+ tests)
+- [x] Updated `tests/test_llm_prompt.py` with multimodal tests
+- [x] A/B comparison report: reference.wav → extract → clone → compare
 
 ### Status
 - [x] Phase 2A core: Spectrogram rendering + VLM integration
 - [x] Phase 2B core: Prompt rewrite + parameter extraction
 - [x] Phase 2C core: Effect cloning pipeline
-- [ ] Phase 2D testing: Validation + A/B experiments
+- [x] Phase 2D testing: Validation + A/B experiments
 
 ### Overall Phase 2 Deliverables
 - [x] Spectrogram visualization module (`utils/spectrogram_renderer.py`)
 - [x] Multimodal VLM-enabled `core/llm_prompt.py`
 - [x] Time-variant parameter extraction & parsing
 - [x] Effect cloning mode in `core/audio_processor.py` and CLI
-- [ ] Comprehensive unit tests (8+ tests for Phase 2B+C+D)
-- [ ] A/B comparison report demonstrating effect style transfer
+- [x] Comprehensive unit tests (8+ tests for Phase 2B+C+D)
+- [x] A/B comparison report demonstrating effect style transfer
 
 ---
 
@@ -167,15 +167,42 @@ Move beyond fixed built-in effects by supporting black-box plugin parameter auto
 ### Goal
 Upgrade from CLI prototype to a usable application.
 
+### Status
+- [x] Phase 4 web prototype completed (frontend + backend + interactive parameter editing)
+
 ### Tasks
-- Build backend API for upload, processing, and result retrieval.
-- Build frontend for file upload, prompt input, progress feedback, and download.
-- Expose generated parameter JSON and timeline visualization for interpretability.
-- Add job management and basic request validation.
+- [x] Build backend API for upload, processing, and result retrieval.
+- [x] Build frontend for file upload, prompt input, progress feedback, and download.
+- [x] Expose generated parameter JSON and editable parameter bars for interpretability.
+- [x] Add session-based job management and basic request validation.
+
+### Implemented Architecture (Phase 4 Web)
+- Backend (`Flask`):
+  - `GET /` → Web UI
+  - `GET /api/effects-spec` → effect parameter ranges for all effects
+  - `POST /api/generate` → upload input `.wav`, prompt, optional reference audio, run `generate` or `extract-and-clone`
+  - `POST /api/regenerate` → regenerate audio directly from slider/bar parameter values
+  - `GET /api/audio/<filename>` → stream generated audio for playback/download
+- Frontend (`HTML + CSS + Vanilla JS`):
+  - Upload form (input wav, prompt, optional reference wav, mode)
+  - Dynamic parameter bars for **all supported effects**
+  - Auto-fill bar values from generated parameters
+  - Manual bar editing + one-click regenerate
+  - Built-in output audio player + download link
+  - JSON panel for debugging and interpretability
 
 ### Deliverables
-- Functional web demo for end users.
-- User flow: upload → prompt → process → preview/download.
+- [x] Functional web demo for end users.
+- [x] User flow: upload → prompt → process → preview/download.
+
+### Deployment Steps (Current)
+1. Install dependencies: `pip install -r requirements.txt`
+2. Set env var: `GEMINI_API_KEY=<your_key>` (or in `.env`)
+3. Run local web app: `python web_app.py`
+4. Open browser: `http://localhost:8000`
+
+For cloud deploy, use a Python web service and run:
+- `gunicorn -w 2 -b 0.0.0.0:$PORT web_app:app`
 
 ---
 

@@ -7,6 +7,7 @@ effect reverse-engineering.
 
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 import numpy as np
 from utils.spectrogram_renderer import (
     generate_reference_spectrogram_image,
@@ -124,6 +125,20 @@ class TestSpectrogramRenderer(unittest.TestCase):
 
         # Should produce identical results
         np.testing.assert_array_equal(mag1, mag2)
+
+    @patch("utils.spectrogram_renderer.librosa.display.specshow")
+    def test_spectrogram_uses_linear_axes_and_viridis(self, mock_specshow):
+        """Ensure renderer calls specshow with linear frequency + viridis colormap."""
+        try:
+            generate_reference_spectrogram_image("reference.wav")
+        except FileNotFoundError:
+            self.skipTest("reference.wav not found")
+
+        self.assertTrue(mock_specshow.called)
+        _, kwargs = mock_specshow.call_args
+        self.assertEqual(kwargs.get("y_axis"), "linear")
+        self.assertEqual(kwargs.get("x_axis"), "time")
+        self.assertEqual(kwargs.get("cmap"), "viridis")
 
 
 if __name__ == "__main__":

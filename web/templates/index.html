@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sound FX Generator Web UI</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>🎛️ Sound FX Generator — Interactive Web UI</h1>
+
+      <section class="card">
+        <h2>1) Upload + Generate Parameters</h2>
+        <form id="generate-form">
+          <div class="grid two">
+            <label>
+              Mode
+              <select name="mode" id="mode">
+                <option value="generate">generate (text-driven)</option>
+                <option value="extract-and-clone">extract-and-clone (reference required)</option>
+              </select>
+            </label>
+
+            <label>
+              Input Audio (.wav)
+              <input type="file" name="input_audio" id="input-audio-file" accept=".wav,audio/wav" required />
+            </label>
+
+            <label class="span-2">
+              Prompt
+              <textarea
+                name="prompt"
+                rows="3"
+                placeholder="Example: Add a mild distortion and slowly increasing reverb"
+              ></textarea>
+            </label>
+
+            <label>
+              Optional Reference Audio (.wav)
+              <input type="file" name="reference_audio" accept=".wav,audio/wav" />
+            </label>
+
+            <label>
+              Normalize output
+              <select name="normalize">
+                <option value="true" selected>Yes</option>
+                <option value="false">No</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Generate from Prompt</button>
+            <span id="generate-status" class="status"></span>
+          </div>
+        </form>
+        <div style="margin-top: 0.5em;">
+          <label><strong>Preview Uploaded Input Audio:</strong></label>
+          <audio id="input-audio-preview" controls style="width: 100%; max-width: 400px;"></audio>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2) Envelope Editor (2D, Time-Variant)</h2>
+        <p class="muted">
+          Each parameter can be edited as a 2D envelope curve (time vs value). Drag the control points to shape the automation curve, then click Regenerate to synthesize new audio.
+        </p>
+        <div id="effects-panel" class="effects-panel"></div>
+        <div class="actions">
+          <button id="regenerate-btn" disabled>Regenerate from Bars</button>
+          <span id="regenerate-status" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3) Output Audio</h2>
+        <audio id="output-player" controls></audio>
+        <div id="output-link-wrap"></div>
+      </section>
+
+      <section class="card">
+        <h2>4) Debug / JSON</h2>
+        <pre id="json-output"></pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

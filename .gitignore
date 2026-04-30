@@ -23,6 +23,8 @@ Thumbs.db
 
 # Output directories
 processed_audio/
+web/uploads/
+web/static/generated/
 
 # Logs
 *.log
