@@ -20,6 +20,9 @@ Time-Varying Parameter Envelopes
 Output Audio + Evaluation Metrics
 ```
 
+## Live Demo Video Link: 
+https://drive.google.com/file/d/1H7maXTJ0SJEKnV5SXe_lvfrDKWPwypYy/view?usp=sharing
+
 ## Features
 
 - **Natural Language Interface**: Users describe desired effects in plain English
